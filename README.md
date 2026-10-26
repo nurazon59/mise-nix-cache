@@ -48,10 +48,9 @@ Binary redistribution licensing must be reviewed before public cache publication
 
 ## Local Worker development
 
-Wrangler is declared in `mise.toml`.
+Install the [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) before running the local server.
 
 ```sh
-mise install
 wrangler dev --local
 ```
 
