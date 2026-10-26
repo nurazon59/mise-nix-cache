@@ -31,7 +31,7 @@ The build script uses the exact upstream SHA and records Nix version, build/expo
 
 The build job exports an unsigned Nix binary cache, then uploads it as an artifact. The publish job runs on a fresh runner, validates manifest fields and filesystem entries, and uses Nix to sign and write the store path to R2. It does not execute binaries or scripts from the artifact. The verify job has no secrets and restores the signed output through the public cache URL.
 
-`MAX_ARTIFACT_BYTES` defaults to 9,500,000,000 bytes to stop before attempting a near-10 GB transfer. This is a project safety threshold, not a GitHub or Cloudflare service limit. If the actual closure or exported artifact exceeds it, keep publishing disabled. Options are a larger dedicated macOS runner, a trusted self-hosted arm64 Mac, or a transfer design using an isolated staging bucket with no signing/R2 credentials on the build host. Do not move signing keys onto the build runner.
+`MAX_ARTIFACT_BYTES` defaults to 9,500,000,000 bytes to stop before attempting a near-10 GB transfer. This is a project safety threshold, not a GitHub or Cloudflare service limit. If the actual closure or exported artifact exceeds it, keep publishing disabled. Options are a trusted self-hosted arm64 Mac with sufficient disk, or a separate handoff service that grants the build job only a short-lived upload capability with no access to production R2 or the signing key. Do not move signing keys or production R2 credentials onto the build runner.
 
 ## Workflow operation
 
