@@ -1,0 +1,162 @@
+name: Update Nix cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even when the cache already contains this output
+        type: boolean
+        required: false
+        default: false
+      upstream_sha:
+        description: Optional jdx/mise main-branch commit SHA
+        type: string
+        required: false
+  schedule:
+    - cron: "17 */6 * * *"
+
+concurrency:
+  group: mise-cache-aarch64-darwin
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: macos-15
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      store_path: ${{ steps.evaluate.outputs.store_path }}
+      skip: ${{ steps.cache.outputs.skip }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e
+        with:
+          github-token: ${{ github.token }}
+          determinate: false
+          source-tag: v3.24.1
+      - name: Resolve upstream SHA
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.upstream_sha }}
+        run: scripts/resolve-upstream.sh "$REQUESTED_SHA"
+      - name: Evaluate store path
+        id: evaluate
+        env:
+          UPSTREAM_SHA: ${{ steps.resolve.outputs.sha }}
+        run: echo "store_path=$(nix eval --raw "github:jdx/mise/$UPSTREAM_SHA#mise.outPath")" >> "$GITHUB_OUTPUT"
+      - name: Check existing signed cache
+        id: cache
+        env:
+          CACHE_URL: ${{ vars.CACHE_URL }}
+          CACHE_PUBLIC_KEY: ${{ vars.CACHE_PUBLIC_KEY }}
+          STORE_PATH: ${{ steps.evaluate.outputs.store_path }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [[ "$FORCE" != true && -n "$CACHE_URL" && -n "$CACHE_PUBLIC_KEY" ]] && \
+            nix copy --from "$CACHE_URL" --option trusted-public-keys "$CACHE_PUBLIC_KEY" \
+              --to "file://$RUNNER_TEMP/existing-cache" "$STORE_PATH" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
+    runs-on: macos-15
+    permissions:
+      contents: read
+    outputs:
+      store_path: ${{ steps.build.outputs.store_path }}
+      closure_bytes: ${{ steps.build.outputs.closure_bytes }}
+      export_bytes: ${{ steps.build.outputs.export_bytes }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e
+        with:
+          github-token: ""
+          determinate: false
+          source-tag: v3.24.1
+      - name: Build and export
+        id: build
+        run: scripts/build-cache.sh "${{ needs.resolve.outputs.sha }}" "$RUNNER_TEMP/mise-cache"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mise-cache-${{ needs.resolve.outputs.sha }}-aarch64-darwin
+          path: ${{ runner.temp }}/mise-cache/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: [resolve, build]
+    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    environment: cache-publish
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e
+        with:
+          github-token: ""
+          determinate: false
+          source-tag: v3.24.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mise-cache-${{ needs.resolve.outputs.sha }}-aarch64-darwin
+          path: ${{ runner.temp }}/mise-cache
+      - name: Validate cache artifact
+        env:
+          UPSTREAM_SHA: ${{ needs.resolve.outputs.sha }}
+          STORE_PATH: ${{ needs.build.outputs.store_path }}
+        run: scripts/validate-cache-artifact.sh "$RUNNER_TEMP/mise-cache" "$UPSTREAM_SHA" "$STORE_PATH"
+      - name: Sign and publish to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: mise-nix-cache
+          NIX_CACHE_SECRET_KEY: ${{ secrets.NIX_CACHE_SECRET_KEY }}
+          STORE_PATH: ${{ needs.build.outputs.store_path }}
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/cache-secret.key"
+          trap 'rm -f "$key_file"' EXIT
+          umask 077
+          printf '%s' "$NIX_CACHE_SECRET_KEY" > "$key_file"
+          nix copy --from "file://$RUNNER_TEMP/mise-cache/cache" \
+            --to "s3://$R2_BUCKET?endpoint=$R2_ACCOUNT_ID.r2.cloudflarestorage.com&region=auto&multipart-upload=true&secret-key=$key_file" \
+            "$STORE_PATH"
+
+  verify:
+    needs: [resolve, build, publish]
+    if: needs.resolve.outputs.skip != 'true'
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e
+        with:
+          github-token: ""
+          determinate: false
+          source-tag: v3.24.1
+      - name: Restore from public cache
+        env:
+          CACHE_URL: ${{ vars.CACHE_URL }}
+          CACHE_PUBLIC_KEY: ${{ vars.CACHE_PUBLIC_KEY }}
+          STORE_PATH: ${{ needs.build.outputs.store_path }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CACHE_URL" && -n "$CACHE_PUBLIC_KEY" ]]
+          nix copy --from "$CACHE_URL" --option trusted-public-keys "$CACHE_PUBLIC_KEY" "$STORE_PATH"
+          "$STORE_PATH/bin/mise" --version
