@@ -61,12 +61,34 @@ wait "$sampler_pid" 2>/dev/null || true
 trap - EXIT
 peak_free_disk=$(sort -n "$disk_samples" | head -n 1)
 rm -f "$disk_samples"
-python3 - "$output_dir/manifest.json" "$sha" "$system" "$store_path" "$closure_bytes" "$cache_bytes" "$started_at" "$finished_at" "$elapsed_seconds" "$disk_before" "$disk_after" "$peak_free_disk" "$nix_version" <<'PY'
+python3 - "$output_dir/manifest.json" "$cache_dir" "$sha" "$system" "$store_path" "$closure_bytes" "$cache_bytes" "$started_at" "$finished_at" "$elapsed_seconds" "$disk_before" "$disk_after" "$peak_free_disk" "$nix_version" <<'PY'
+import hashlib
 import json
+import os
 import sys
 
-(path, sha, system, store_path, closure_bytes, cache_bytes, started_at,
+(path, cache_dir, sha, system, store_path, closure_bytes, cache_bytes, started_at,
  finished_at, elapsed_seconds, disk_before, disk_after, peak_free_disk, nix_version) = sys.argv[1:]
+files = []
+for current, directories, names in os.walk(cache_dir):
+    for name in directories:
+        if os.path.islink(os.path.join(current, name)):
+            raise SystemExit(f"symlink in exported cache: {name}")
+    for name in names:
+        file_path = os.path.join(current, name)
+        if os.path.islink(file_path) or not os.path.isfile(file_path):
+            raise SystemExit(f"non-regular file in exported cache: {name}")
+        relative_path = os.path.relpath(file_path, cache_dir)
+        digest = hashlib.sha256()
+        with open(file_path, "rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        files.append({
+            "path": relative_path,
+            "size_bytes": os.path.getsize(file_path),
+            "sha256": digest.hexdigest(),
+        })
+files.sort(key=lambda entry: entry["path"])
 manifest = {
     "schema_version": 1,
     "upstream_repository": "jdx/mise",
@@ -82,6 +104,7 @@ manifest = {
     "free_disk_before_bytes": int(disk_before),
     "free_disk_after_bytes": int(disk_after),
     "minimum_free_disk_bytes": int(peak_free_disk),
+    "files": files,
 }
 with open(path, "w", encoding="utf-8") as file:
     json.dump(manifest, file, indent=2)
