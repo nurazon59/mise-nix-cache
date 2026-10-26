@@ -1,0 +1,5 @@
+.wrangler/
+cache-secret.key
+cache-public.key
+*.narinfo
+result

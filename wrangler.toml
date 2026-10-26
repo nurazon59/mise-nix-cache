@@ -1,0 +1,8 @@
+name = "mise-nix-cache"
+main = "src/worker.ts"
+compatibility_date = "2025-10-01"
+workers_dev = true
+
+[[r2_buckets]]
+binding = "CACHE"
+bucket_name = "mise-nix-cache"
