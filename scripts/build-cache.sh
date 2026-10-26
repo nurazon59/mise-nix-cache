@@ -36,7 +36,17 @@ cache_dir="$output_dir/cache"
 mkdir -p "$cache_dir"
 nix copy --to "file://$cache_dir?compression=zstd&compression-level=3" "$store_path"
 
-cache_bytes=$(du -sk "$cache_dir" | awk '{ print $1 * 1024 }')
+cache_bytes=$(python3 - "$cache_dir" <<'PY'
+import os
+import sys
+
+total = 0
+for current, _, files in os.walk(sys.argv[1]):
+    for name in files:
+        total += os.path.getsize(os.path.join(current, name))
+print(total)
+PY
+)
 max_artifact_bytes=${MAX_ARTIFACT_BYTES:-9500000000}
 if (( cache_bytes > max_artifact_bytes )); then
 	echo "Exported cache is ${cache_bytes} bytes; transfer limit is ${max_artifact_bytes}" >&2
