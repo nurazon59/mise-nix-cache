@@ -24,6 +24,7 @@ permissions:
 
 jobs:
   resolve:
+    if: github.event_name != 'schedule' || vars.CACHE_PUBLISH_ENABLED == 'true'
     runs-on: macos-15
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
@@ -97,7 +98,7 @@ jobs:
 
   publish:
     needs: [resolve, build]
-    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main' && vars.CACHE_PUBLISH_ENABLED == 'true'
     runs-on: macos-15
     environment: cache-publish
     permissions:

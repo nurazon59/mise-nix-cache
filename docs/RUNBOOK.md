@@ -23,6 +23,7 @@
 5. Add `NIX_CACHE_SECRET_KEY` to the `cache-publish` Environment. If the secret contains a key name prefix and colon, preserve it exactly.
 6. Configure required reviewers on the `cache-publish` Environment before enabling production publishing.
 7. Confirm the R2 storage allowance and account usage, and complete the build-size P0 measurements before enabling the workflow.
+8. Only after all P0 gates pass, set the repository Variable `CACHE_PUBLISH_ENABLED` to `true`. Without it, scheduled builds do not start and publish/verify jobs stay disabled. Manual dispatch remains available to measure a P0 build.
 
 ## P0 measurement
 
