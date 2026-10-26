@@ -30,7 +30,7 @@ trap 'kill "$sampler_pid" 2>/dev/null || true; wait "$sampler_pid" 2>/dev/null |
 nix build --no-link "$flake_ref"
 "$store_path/bin/mise" --version
 
-closure_bytes=$(nix path-info --closure-size --json "$store_path" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["closureSize"])')
+closure_bytes=$(nix path-info --closure-size --json-format 1 --json "$store_path" | python3 -c 'import json,sys; print(next(iter(json.load(sys.stdin).values()))["closureSize"])')
 
 cache_dir="$output_dir/cache"
 mkdir -p "$cache_dir"
