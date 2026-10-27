@@ -1,0 +1,46 @@
+name: Measure mise Nix build
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_sha:
+        description: jdx/mise main-branch commit SHA (empty selects current main)
+        type: string
+        required: false
+        default: "58e4ab47dc64a8486370b923629601964173b883"
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: macos-15
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e
+        with:
+          github-token: ""
+          determinate: false
+          source-tag: v3.24.1
+      - name: Resolve upstream SHA
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.upstream_sha }}
+        run: scripts/resolve-upstream.sh "$REQUESTED_SHA"
+      - name: Measure build
+        timeout-minutes: 225
+        env:
+          UPSTREAM_SHA: ${{ steps.resolve.outputs.sha }}
+        run: scripts/measure-build.sh "$UPSTREAM_SHA" "$RUNNER_TEMP/mise-build-measurement"
+      - name: Upload build logs and resource samples
+        if: always() && steps.resolve.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mise-build-measurement-${{ steps.resolve.outputs.sha }}
+          path: ${{ runner.temp }}/mise-build-measurement/
+          retention-days: 7
+          if-no-files-found: warn
