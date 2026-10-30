@@ -9,7 +9,7 @@ on:
         required: false
         default: false
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 * * * *"
 
 concurrency:
   group: mise-cache-aarch64-darwin
