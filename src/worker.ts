@@ -5,6 +5,7 @@ interface Env {
 const cacheInfoKey = "nix-cache-info";
 const narKey = /^nar\/[A-Za-z0-9+._-]+\.nar(?:\.(?:xz|zst|bz2|gz|lz4|br))?$/;
 const narInfoKey = /^[a-z0-9]{32}\.narinfo$/;
+const metadataKey = /^_meta\/(?:aarch64-darwin\/[a-f0-9]{40}\.json|latest-success-aarch64-darwin\.json)$/;
 
 function cacheKey(pathname: string): string | null {
 	let key: string;
@@ -15,7 +16,12 @@ function cacheKey(pathname: string): string | null {
 		return null;
 	}
 
-	if (key === cacheInfoKey || narInfoKey.test(key) || narKey.test(key)) {
+	if (
+		key === cacheInfoKey ||
+		narInfoKey.test(key) ||
+		narKey.test(key) ||
+		metadataKey.test(key)
+	) {
 		return key;
 	}
 
@@ -23,6 +29,9 @@ function cacheKey(pathname: string): string | null {
 }
 
 function cacheControl(key: string): string {
+	if (key.startsWith("_meta/")) {
+		return "public, max-age=30, must-revalidate";
+	}
 	if (key === cacheInfoKey) return "public, max-age=60";
 	if (key.endsWith(".narinfo")) return "public, max-age=60";
 	return "public, max-age=31536000, immutable";
@@ -38,22 +47,25 @@ export default {
 		}
 
 		const key = cacheKey(new URL(request.url).pathname);
-		if (!key) return new Response("Not found\n", { status: 404 });
+		if (!key) return new Response("Not found\n", { status: 404, headers: { "cache-control": "no-store" } });
 
 		const object =
 			request.method === "HEAD"
 				? await env.CACHE.head(key)
 				: await env.CACHE.get(key);
-		if (!object) return new Response("Not found\n", { status: 404 });
+		if (!object) return new Response("Not found\n", { status: 404, headers: { "cache-control": "no-store" } });
 
 		const headers = new Headers();
 		object.writeHttpMetadata(headers);
 		headers.set("etag", object.httpEtag);
+		headers.set("content-length", String(object.size));
 		headers.set("cache-control", cacheControl(key));
 		if (!headers.has("content-type")) {
 			headers.set(
 				"content-type",
-				key.endsWith(".narinfo") || key === cacheInfoKey
+				key.startsWith("_meta/")
+					? "application/json"
+					: key.endsWith(".narinfo") || key === cacheInfoKey
 					? "text/plain; charset=utf-8"
 					: "application/octet-stream",
 			);

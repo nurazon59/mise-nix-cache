@@ -5,7 +5,7 @@
 - R2 bucket: `mise-nix-cache` (Standard, private by default).
 - Worker: deployed at `https://mise-nix-cache.i2kiii-fib.workers.dev`; read-only routes are verified. The bucket is empty until a signed publication succeeds.
 - Upstream target: the latest published stable `jdx/mise` GitHub release tag, `aarch64-darwin`, `#mise`. Unreleased `main` commits are excluded from automatic publication.
-- GitHub Actions publication is disabled until these P0 gates pass: hosted-runner build capacity, exported closure transfer capacity, Nix signature verification, public cache retrieval, and clean-client substitution.
+- GitHub Actions publication is disabled until these P0 gates pass: exported closure transfer capacity, Nix signature verification, public cache retrieval, clean-client substitution, and redistribution licensing review.
 - `CACHE_URL`, `CACHE_PUBLIC_KEY`, and `R2_ACCOUNT_ID` are GitHub repository Variables. `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `NIX_CACHE_SECRET_KEY` belong only to the protected `cache-publish` Environment.
 
 ## Initial setup
@@ -23,7 +23,7 @@
 5. Add `NIX_CACHE_SECRET_KEY` to the `cache-publish` Environment. If the secret contains a key name prefix and colon, preserve it exactly.
 6. Configure required reviewers on the `cache-publish` Environment before enabling production publishing.
 7. Confirm the R2 storage allowance and account usage, and complete the build-size P0 measurements before enabling the workflow.
-8. Only after all P0 gates pass, set the repository Variable `CACHE_PUBLISH_ENABLED` to `true`. Without it, scheduled builds do not start and publish/verify jobs stay disabled. Manual dispatch remains available to measure a P0 build.
+8. With scheduling still disabled, run the workflow manually on `main` with `publish=true` and approve the protected environment. Verify the artifact transfer, signed upload, public restore, success metadata, licensing, and storage usage. Only after all P0 gates pass, set the repository Variable `CACHE_PUBLISH_ENABLED` to `true` to enable scheduled publication.
 
 ## P0 measurement
 
@@ -33,17 +33,19 @@ For a build-only measurement, manually run the `Measure mise Nix build` workflow
 
 Local PoC on 2026-10-27 evaluated upstream `jdx/mise` SHA `58e4ab47dc64a8486370b923629601964173b883` and ran for about 50 minutes. Compilation completed, but the upstream test suite failed: 3,282 passed and `toolset::running::tests::lists_every_process_on_macos` panicked because its process-list command was unavailable in this execution environment. Nix therefore did not produce the exact upstream derivation output path; its closure size and artifact transfer remain unmeasured. This is not a verified successful build and must not be published. The local `/nix` filesystem grew from roughly 42 GiB to 60 GiB used during the run, while ending with 270 GiB free; this is an observed host-store delta, not an isolated peak or closure measurement. Repeat the unchanged upstream build on the intended GitHub runner or an equivalent macOS environment where the upstream process-list test can run. Do not bypass the failing test to enable publication.
 
+On 2026-10-30, the unchanged upstream release `v2026.10.24` at `aa26090fc10184bf61997e5784f72c365c8c8ece` passed the [macOS build measurement](https://github.com/nurazon59/mise-nix-cache/actions/runs/41039109681). This validates that build on that runner, but does not establish artifact transfer, signing, R2 upload, or public restoration.
+
 At the operator's request, a separate diagnostic build used the same upstream source SHA with its check phase replaced by a no-op. Release compilation completed in 25m 35s, and the resulting binary reported `2026.10.19 macos-arm64`. The manually altered derivation did not register its expected output path because its embedded output path remained the original one. For size measurement only, the binary directory was copied into a content-addressed local store path: NAR/closure size was 231,246,224 bytes and the exported unsigned Nix cache files totaled 70,419,152 bytes. This is an indicative transfer size for this build, not a successful build of the exact upstream derivation path; no signature, R2 upload, GitHub artifact transfer, or clean-client restore was tested.
 
-The build job exports an unsigned Nix binary cache, then uploads it as an artifact. The publish job runs on a fresh runner, validates manifest fields and filesystem entries, and uses Nix to sign and write the store path to R2. It does not execute binaries or scripts from the artifact. The verify job has no secrets and restores the signed output through the public cache URL.
+The build job exports an unsigned Nix binary cache, then uploads it as an artifact. The publish job runs on a fresh runner, validates the artifact against the independently evaluated store path, and uses Nix to sign and write it to R2. It disables signature checks only for the copy from this validated unsigned artifact; it does not execute binaries or scripts from the artifact. The verify job has no secrets, verifies signatures and contents from the public URL, and restores the signed output. Success metadata is written only after verification.
 
 `MAX_ARTIFACT_BYTES` defaults to 9,500,000,000 bytes to stop before attempting a near-10 GB transfer. This is a project safety threshold, not a GitHub or Cloudflare service limit. If the actual closure or exported artifact exceeds it, keep publishing disabled. Options are a trusted self-hosted arm64 Mac with sufficient disk, or a separate handoff service that grants the build job only a short-lived upload capability with no access to production R2 or the signing key. Do not move signing keys or production R2 credentials onto the build runner.
 
 ## Workflow operation
 
 - The scheduled workflow polls `jdx/mise` GitHub Releases every hour and selects only the latest published, non-prerelease release tag (for example, `v2026.10.24`). GitHub's release API resolves the tag to an immutable commit SHA for the build. Commits on `main` without a published stable release are ignored; multiple releases between polls may result in only the latest being built.
-- `workflow_dispatch` builds the latest published stable release (optionally with `force=true` to bypass the existing-cache check); arbitrary commit SHAs cannot be selected through the production workflow. Use the separate measurement workflow for diagnostics.
-- Existing release paths are skipped only when Nix can restore them from the public URL with the configured signing public key. If publishing is disabled, scheduled runs do not start; a manual run may still build for measurement without publishing.
+- `workflow_dispatch` builds the latest published stable release (optionally with `force=true` to bypass the existing-cache check). Set `publish=true` for a one-off publication while scheduled publication is disabled; otherwise a manual run is build-only unless scheduled publication is enabled. Arbitrary commit SHAs cannot be selected through the production workflow. Use the separate measurement workflow for diagnostics.
+- Existing release paths are skipped only when their contents and signatures verify from the public URL with the configured signing public key. If publishing is disabled, scheduled runs do not start.
 - Only runs on the repository's `main` branch can publish. Pull requests and other branches cannot access the protected Environment.
 - A failed build, artifact validation, upload, or public restore is not a successful publication. Inspect the named job and retain the previous cache objects.
 - A Nix store path is immutable, so rerunning the same SHA does not need to replace successful NARs.

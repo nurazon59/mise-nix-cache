@@ -8,6 +8,11 @@ on:
         type: boolean
         required: false
         default: false
+      publish:
+        description: Publish this manual run after approving the protected environment
+        type: boolean
+        required: false
+        default: false
   schedule:
     - cron: "17 * * * *"
 
@@ -52,11 +57,17 @@ jobs:
           CACHE_URL: ${{ vars.CACHE_URL }}
           CACHE_PUBLIC_KEY: ${{ vars.CACHE_PUBLIC_KEY }}
           STORE_PATH: ${{ steps.evaluate.outputs.store_path }}
+          UPSTREAM_SHA: ${{ steps.resolve.outputs.sha }}
           FORCE: ${{ inputs.force }}
         run: |
+          metadata_file="$RUNNER_TEMP/existing-cache-metadata.json"
           if [[ "$FORCE" != true && -n "$CACHE_URL" && -n "$CACHE_PUBLIC_KEY" ]] && \
-            nix copy --from "$CACHE_URL" --option trusted-public-keys "$CACHE_PUBLIC_KEY" \
-              --to "file://$RUNNER_TEMP/existing-cache" "$STORE_PATH" >/dev/null 2>&1; then
+            curl --fail --silent --show-error "$CACHE_URL/_meta/aarch64-darwin/$UPSTREAM_SHA.json" -o "$metadata_file" && \
+            jq -e --arg sha "$UPSTREAM_SHA" --arg path "$STORE_PATH" \
+              '.schema_version == 1 and .upstream_repository == "jdx/mise" and .upstream_sha == $sha and .system == "aarch64-darwin" and .store_path == $path and .status == "success"' \
+              "$metadata_file" >/dev/null && \
+            nix store verify --store "$CACHE_URL" --recursive --sigs-needed 1 \
+              --option trusted-public-keys "$CACHE_PUBLIC_KEY" "$STORE_PATH" >/dev/null 2>&1; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -66,6 +77,7 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
     runs-on: macos-15
+    timeout-minutes: 240
     permissions:
       contents: read
     outputs:
@@ -83,6 +95,7 @@ jobs:
           source-tag: v3.24.1
       - name: Build and export
         id: build
+        timeout-minutes: 225
         run: scripts/build-cache.sh "${{ needs.resolve.outputs.sha }}" "$RUNNER_TEMP/mise-cache"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -94,7 +107,7 @@ jobs:
 
   publish:
     needs: [resolve, build]
-    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main' && vars.CACHE_PUBLISH_ENABLED == 'true'
+    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main' && (vars.CACHE_PUBLISH_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: macos-15
     environment: cache-publish
     permissions:
@@ -115,8 +128,8 @@ jobs:
       - name: Validate cache artifact
         env:
           UPSTREAM_SHA: ${{ needs.resolve.outputs.sha }}
-          STORE_PATH: ${{ needs.build.outputs.store_path }}
-        run: scripts/validate-cache-artifact.sh "$RUNNER_TEMP/mise-cache" "$UPSTREAM_SHA" "$STORE_PATH"
+          STORE_PATH: ${{ needs.resolve.outputs.store_path }}
+        run: bash scripts/validate-cache-artifact.sh "$RUNNER_TEMP/mise-cache" "$UPSTREAM_SHA" "$STORE_PATH"
       - name: Sign and publish to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -125,14 +138,18 @@ jobs:
           R2_BUCKET: mise-nix-cache
           NIX_CACHE_SECRET_KEY: ${{ secrets.NIX_CACHE_SECRET_KEY }}
           STORE_PATH: ${{ needs.build.outputs.store_path }}
+          EXPECTED_STORE_PATH: ${{ needs.resolve.outputs.store_path }}
+          AWS_EC2_METADATA_DISABLED: "true"
         run: |
           set -euo pipefail
+          [[ "$STORE_PATH" == "$EXPECTED_STORE_PATH" && -n "$AWS_ACCESS_KEY_ID" && -n "$AWS_SECRET_ACCESS_KEY" && -n "$NIX_CACHE_SECRET_KEY" ]]
+          [[ "$R2_ACCOUNT_ID" =~ ^[a-f0-9]{32}$ ]]
           key_file="$RUNNER_TEMP/cache-secret.key"
           trap 'rm -f "$key_file"' EXIT
           umask 077
           printf '%s' "$NIX_CACHE_SECRET_KEY" > "$key_file"
-          nix copy --from "file://$RUNNER_TEMP/mise-cache/cache" \
-            --to "s3://$R2_BUCKET?endpoint=$R2_ACCOUNT_ID.r2.cloudflarestorage.com&region=auto&multipart-upload=true&secret-key=$key_file" \
+          nix copy --no-check-sigs --from "file://$RUNNER_TEMP/mise-cache/cache" \
+            --to "s3://$R2_BUCKET?endpoint=$R2_ACCOUNT_ID.r2.cloudflarestorage.com&region=auto&secret-key=$key_file" \
             "$STORE_PATH"
 
   verify:
@@ -155,5 +172,35 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "$CACHE_URL" && -n "$CACHE_PUBLIC_KEY" ]]
+          if nix path-info "$STORE_PATH" >/dev/null 2>&1; then
+            echo "Store path already exists on the verification runner" >&2
+            exit 1
+          fi
+          nix store verify --store "$CACHE_URL" --recursive --sigs-needed 1 \
+            --option trusted-public-keys "$CACHE_PUBLIC_KEY" "$STORE_PATH"
           nix copy --from "$CACHE_URL" --option trusted-public-keys "$CACHE_PUBLIC_KEY" "$STORE_PATH"
           "$STORE_PATH/bin/mise" --version
+
+  record-success:
+    needs: [resolve, build, publish, verify]
+    if: needs.resolve.outputs.skip != 'true' && needs.verify.result == 'success'
+    runs-on: macos-15
+    environment: cache-publish
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - name: Record successful publication
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: mise-nix-cache
+          UPSTREAM_SHA: ${{ needs.resolve.outputs.sha }}
+          STORE_PATH: ${{ needs.build.outputs.store_path }}
+          EXPORT_BYTES: ${{ needs.build.outputs.export_bytes }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/write-success-metadata.sh "$UPSTREAM_SHA" "$STORE_PATH" "$EXPORT_BYTES" "$WORKFLOW_RUN_URL"

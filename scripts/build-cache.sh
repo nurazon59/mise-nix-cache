@@ -30,23 +30,13 @@ trap 'kill "$sampler_pid" 2>/dev/null || true; wait "$sampler_pid" 2>/dev/null |
 nix build --no-link "$flake_ref"
 "$store_path/bin/mise" --version
 
-closure_bytes=$(nix path-info --closure-size --json-format 1 --json "$store_path" | python3 -c 'import json,sys; print(next(iter(json.load(sys.stdin).values()))["closureSize"])')
+closure_bytes=$(nix path-info --closure-size --json-format 1 --json "$store_path" | jq -er 'to_entries[0].value.closureSize')
 
 cache_dir="$output_dir/cache"
 mkdir -p "$cache_dir"
 nix copy --to "file://$cache_dir?compression=zstd&compression-level=3" "$store_path"
 
-cache_bytes=$(python3 - "$cache_dir" <<'PY'
-import os
-import sys
-
-total = 0
-for current, _, files in os.walk(sys.argv[1]):
-    for name in files:
-        total += os.path.getsize(os.path.join(current, name))
-print(total)
-PY
-)
+cache_bytes=$(find "$cache_dir" -type f -exec stat -f '%z' {} + | awk '{ total += $1 } END { print total + 0 }')
 max_artifact_bytes=${MAX_ARTIFACT_BYTES:-9500000000}
 if (( cache_bytes > max_artifact_bytes )); then
 	echo "Exported cache is ${cache_bytes} bytes; transfer limit is ${max_artifact_bytes}" >&2
@@ -61,55 +51,27 @@ wait "$sampler_pid" 2>/dev/null || true
 trap - EXIT
 peak_free_disk=$(sort -n "$disk_samples" | head -n 1)
 rm -f "$disk_samples"
-python3 - "$output_dir/manifest.json" "$cache_dir" "$sha" "$system" "$store_path" "$closure_bytes" "$cache_bytes" "$started_at" "$finished_at" "$elapsed_seconds" "$disk_before" "$disk_after" "$peak_free_disk" "$nix_version" <<'PY'
-import hashlib
-import json
-import os
-import sys
-
-(path, cache_dir, sha, system, store_path, closure_bytes, cache_bytes, started_at,
- finished_at, elapsed_seconds, disk_before, disk_after, peak_free_disk, nix_version) = sys.argv[1:]
-files = []
-for current, directories, names in os.walk(cache_dir):
-    for name in directories:
-        if os.path.islink(os.path.join(current, name)):
-            raise SystemExit(f"symlink in exported cache: {name}")
-    for name in names:
-        file_path = os.path.join(current, name)
-        if os.path.islink(file_path) or not os.path.isfile(file_path):
-            raise SystemExit(f"non-regular file in exported cache: {name}")
-        relative_path = os.path.relpath(file_path, cache_dir)
-        digest = hashlib.sha256()
-        with open(file_path, "rb") as file:
-            for chunk in iter(lambda: file.read(1024 * 1024), b""):
-                digest.update(chunk)
-        files.append({
-            "path": relative_path,
-            "size_bytes": os.path.getsize(file_path),
-            "sha256": digest.hexdigest(),
-        })
-files.sort(key=lambda entry: entry["path"])
-manifest = {
-    "schema_version": 1,
-    "upstream_repository": "jdx/mise",
-    "upstream_sha": sha,
-    "system": system,
-    "store_path": store_path,
-    "nix_version": nix_version,
-    "closure_size_bytes": int(closure_bytes),
-    "export_size_bytes": int(cache_bytes),
-    "started_at": started_at,
-    "finished_at": finished_at,
-    "elapsed_seconds": int(elapsed_seconds),
-    "free_disk_before_bytes": int(disk_before),
-    "free_disk_after_bytes": int(disk_after),
-    "minimum_free_disk_bytes": int(peak_free_disk),
-    "files": files,
-}
-with open(path, "w", encoding="utf-8") as file:
-    json.dump(manifest, file, indent=2)
-    file.write("\n")
-PY
+entries_file="$output_dir/manifest-files.jsonl"
+: > "$entries_file"
+while IFS= read -r -d '' file_path; do
+	[[ ! -L "$file_path" && -f "$file_path" ]] || { echo "non-regular file in exported cache: $file_path" >&2; exit 1; }
+	relative_path=${file_path#"$cache_dir"/}
+	file_size=$(stat -f '%z' "$file_path")
+	file_sha=$(shasum -a 256 "$file_path" | awk '{ print $1 }')
+	jq -cn --arg path "$relative_path" --arg sha256 "$file_sha" --argjson size "$file_size" \
+		'{path: $path, size_bytes: $size, sha256: $sha256}' >> "$entries_file"
+done < <(find "$cache_dir" -type f -print0)
+files_json=$(jq -s 'sort_by(.path)' "$entries_file")
+rm -f "$entries_file"
+jq -n \
+	--arg sha "$sha" --arg system "$system" --arg store_path "$store_path" \
+	--arg nix_version "$nix_version" --arg started_at "$started_at" --arg finished_at "$finished_at" \
+	--argjson closure_bytes "$closure_bytes" --argjson cache_bytes "$cache_bytes" \
+	--argjson elapsed_seconds "$elapsed_seconds" --argjson disk_before "$disk_before" \
+	--argjson disk_after "$disk_after" --argjson peak_free_disk "$peak_free_disk" \
+	--argjson files "$files_json" \
+	'{schema_version: 1, upstream_repository: "jdx/mise", upstream_sha: $sha, system: $system, store_path: $store_path, nix_version: $nix_version, closure_size_bytes: $closure_bytes, export_size_bytes: $cache_bytes, started_at: $started_at, finished_at: $finished_at, elapsed_seconds: $elapsed_seconds, free_disk_before_bytes: $disk_before, free_disk_after_bytes: $disk_after, minimum_free_disk_bytes: $peak_free_disk, files: $files}' \
+	> "$output_dir/manifest.json"
 
 echo "store_path=$store_path" >> "$GITHUB_OUTPUT"
 echo "closure_bytes=$closure_bytes" >> "$GITHUB_OUTPUT"
