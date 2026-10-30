@@ -40,7 +40,7 @@ Non-trusted users may not be allowed to add a substituter or trusted key through
 
 This is a community cache, not an official mise or nixpkgs service. Nix signatures establish that the object was published by this cache and was not changed in transit; they do not prove that upstream source code is safe. Build jobs execute upstream source and receive no signing key or R2 credentials. Separate publish jobs validate and sign data-only Nix cache artifacts; the public Worker accepts only GET and HEAD requests.
 
-Availability is best-effort and limited to the latest detected `jdx/mise` default-branch commit for `aarch64-darwin`. A cache miss falls back to normal Nix behavior. Historical revisions and alternate lock/input combinations are not guaranteed to hit.
+Availability is best-effort and limited to the latest published stable `jdx/mise` GitHub release tag for `aarch64-darwin`. The workflow polls for releases every six hours and builds only when the selected release's signed store path is absent from the cache; unpublished `main` commits do not trigger builds. A cache miss falls back to normal Nix behavior. Intermediate releases, historical revisions, and alternate lock/input combinations are not guaranteed to hit.
 
 The cache retains published NARs; automatic garbage collection is not configured. Cloudflare's 10 GB-month R2 Free allocation is a monthly billing allowance, not a hard storage cap. Standard storage above the allowance is billed at the current rate, and stored revisions accumulate. Check the [current R2 pricing](https://developers.cloudflare.com/r2/pricing/) and usage before enabling automatic publishing.
 
