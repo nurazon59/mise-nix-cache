@@ -41,7 +41,7 @@ The build job exports an unsigned Nix binary cache, then uploads it as an artifa
 
 ## Workflow operation
 
-- The scheduled workflow polls `jdx/mise` GitHub Releases every six hours and selects only the latest published, non-prerelease release tag (for example, `v2026.10.24`). GitHub's release API resolves the tag to an immutable commit SHA for the build. Commits on `main` without a published stable release are ignored; multiple releases between polls may result in only the latest being built.
+- The scheduled workflow polls `jdx/mise` GitHub Releases every hour and selects only the latest published, non-prerelease release tag (for example, `v2026.10.24`). GitHub's release API resolves the tag to an immutable commit SHA for the build. Commits on `main` without a published stable release are ignored; multiple releases between polls may result in only the latest being built.
 - `workflow_dispatch` builds the latest published stable release (optionally with `force=true` to bypass the existing-cache check); arbitrary commit SHAs cannot be selected through the production workflow. Use the separate measurement workflow for diagnostics.
 - Existing release paths are skipped only when Nix can restore them from the public URL with the configured signing public key. If publishing is disabled, scheduled runs do not start; a manual run may still build for measurement without publishing.
 - Only runs on the repository's `main` branch can publish. Pull requests and other branches cannot access the protected Environment.
