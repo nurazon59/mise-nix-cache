@@ -4,7 +4,7 @@
 
 - R2 bucket: `mise-nix-cache` (Standard, private by default).
 - Worker: deployed at `https://mise-nix-cache.i2kiii-fib.workers.dev`; read-only routes are verified. The bucket is empty until a signed publication succeeds.
-- Upstream target: `jdx/mise` `main`, `aarch64-darwin`, `#mise`.
+- Upstream target: the latest published stable `jdx/mise` GitHub release tag, `aarch64-darwin`, `#mise`. Unreleased `main` commits are excluded from automatic publication.
 - GitHub Actions publication is disabled until these P0 gates pass: hosted-runner build capacity, exported closure transfer capacity, Nix signature verification, public cache retrieval, and clean-client substitution.
 - `CACHE_URL`, `CACHE_PUBLIC_KEY`, and `R2_ACCOUNT_ID` are GitHub repository Variables. `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `NIX_CACHE_SECRET_KEY` belong only to the protected `cache-publish` Environment.
 
@@ -29,7 +29,7 @@
 
 The build script uses the exact upstream SHA and records Nix version, build/export duration, sampled minimum free disk, closure bytes, and exported binary-cache bytes in `manifest.json`. A local laptop result does not prove that `macos-15` hosted runners can fit the build: current standard arm64 macOS runners provide 7 GB RAM and 14 GB SSD.
 
-For a build-only measurement, manually run the `Measure mise Nix build` workflow with a SHA reachable from upstream `main`. The default is the SHA used for the initial PoC; an empty input selects the current upstream head. The job uses `macos-15`, streams full Nix build logs, and samples the runner about every 30 seconds. Download the `mise-build-measurement-<SHA>` artifact for the build log, free disk on `/nix`, `vm_stat`, swap and CPU usage, and the 15 processes with the highest CPU usage. CPU percentages and RSS in the process list are per process; system CPU, memory and disk samples cover the runner, not just Nix. A 225-minute build timeout leaves time for artifact upload inside the 240-minute job timeout. A forced cancellation or runner loss may prevent artifact upload. The measurement job has no signing key or R2 credentials and does not publish a cache.
+For a build-only measurement, manually run the `Measure mise Nix build` workflow with a SHA reachable from upstream `main`; an empty input selects the current upstream head. This diagnostic workflow does not publish or determine the production release selection. The job uses `macos-15`, streams full Nix build logs, and samples the runner about every 30 seconds. Download the `mise-build-measurement-<SHA>` artifact for the build log, free disk on `/nix`, `vm_stat`, swap and CPU usage, and the 15 processes with the highest CPU usage. CPU percentages and RSS in the process list are per process; system CPU, memory and disk samples cover the runner, not just Nix. A 225-minute build timeout leaves time for artifact upload inside the 240-minute job timeout. A forced cancellation or runner loss may prevent artifact upload. The measurement job has no signing key or R2 credentials and does not publish a cache.
 
 Local PoC on 2026-10-27 evaluated upstream `jdx/mise` SHA `58e4ab47dc64a8486370b923629601964173b883` and ran for about 50 minutes. Compilation completed, but the upstream test suite failed: 3,282 passed and `toolset::running::tests::lists_every_process_on_macos` panicked because its process-list command was unavailable in this execution environment. Nix therefore did not produce the exact upstream derivation output path; its closure size and artifact transfer remain unmeasured. This is not a verified successful build and must not be published. The local `/nix` filesystem grew from roughly 42 GiB to 60 GiB used during the run, while ending with 270 GiB free; this is an observed host-store delta, not an isolated peak or closure measurement. Repeat the unchanged upstream build on the intended GitHub runner or an equivalent macOS environment where the upstream process-list test can run. Do not bypass the failing test to enable publication.
 
@@ -41,8 +41,9 @@ The build job exports an unsigned Nix binary cache, then uploads it as an artifa
 
 ## Workflow operation
 
-- The scheduled workflow checks `jdx/mise` `main` every six hours. `workflow_dispatch` can force a rebuild or select a SHA reachable from `main`.
-- Existing paths are skipped only when Nix can restore them from the public URL with the configured signing public key.
+- The scheduled workflow polls `jdx/mise` GitHub Releases every six hours and selects only the latest published, non-prerelease release tag (for example, `v2026.10.24`). GitHub's release API resolves the tag to an immutable commit SHA for the build. Commits on `main` without a published stable release are ignored; multiple releases between polls may result in only the latest being built.
+- `workflow_dispatch` builds the latest published stable release (optionally with `force=true` to bypass the existing-cache check); arbitrary commit SHAs cannot be selected through the production workflow. Use the separate measurement workflow for diagnostics.
+- Existing release paths are skipped only when Nix can restore them from the public URL with the configured signing public key. If publishing is disabled, scheduled runs do not start; a manual run may still build for measurement without publishing.
 - Only runs on the repository's `main` branch can publish. Pull requests and other branches cannot access the protected Environment.
 - A failed build, artifact validation, upload, or public restore is not a successful publication. Inspect the named job and retain the previous cache objects.
 - A Nix store path is immutable, so rerunning the same SHA does not need to replace successful NARs.
