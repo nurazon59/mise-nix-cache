@@ -4,14 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: Rebuild even when the cache already contains this output
+        description: Rebuild the latest stable release even when already cached
         type: boolean
         required: false
         default: false
-      upstream_sha:
-        description: Optional jdx/mise main-branch commit SHA
-        type: string
-        required: false
   schedule:
     - cron: "17 */6 * * *"
 
@@ -28,6 +24,7 @@ jobs:
     runs-on: macos-15
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
       store_path: ${{ steps.evaluate.outputs.store_path }}
       skip: ${{ steps.cache.outputs.skip }}
     steps:
@@ -39,12 +36,11 @@ jobs:
           github-token: ${{ github.token }}
           determinate: false
           source-tag: v3.24.1
-      - name: Resolve upstream SHA
+      - name: Resolve latest stable release
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_SHA: ${{ inputs.upstream_sha }}
-        run: scripts/resolve-upstream.sh "$REQUESTED_SHA"
+        run: bash scripts/resolve-release.sh
       - name: Evaluate store path
         id: evaluate
         env:
