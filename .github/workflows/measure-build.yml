@@ -1,9 +1,6 @@
 name: Measure mise Nix build
 
 on:
-  push:
-    branches:
-      - ci/verify-mise-nix-upstream-20261030
   workflow_dispatch:
     inputs:
       upstream_sha:
@@ -32,7 +29,7 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_SHA: ${{ github.event_name == 'push' && 'aa26090fc10184bf61997e5784f72c365c8c8ece' || inputs.upstream_sha }}
+          REQUESTED_SHA: ${{ inputs.upstream_sha }}
         run: scripts/resolve-upstream.sh "$REQUESTED_SHA"
       - name: Measure build
         timeout-minutes: 225
