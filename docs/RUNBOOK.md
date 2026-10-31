@@ -7,6 +7,7 @@
 - Upstream target: the latest published stable `jdx/mise` GitHub release tag, `aarch64-darwin`, `#mise`. Unreleased `main` commits are excluded from automatic publication.
 - Scheduled publication is disabled until the remaining P0 gates, including redistribution licensing review, pass.
 - `CACHE_URL`, `CACHE_PUBLIC_KEY`, and `R2_ACCOUNT_ID` are GitHub repository Variables. `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `NIX_CACHE_SECRET_KEY` belong only to the protected `cache-publish` Environment.
+- `CODEMAGIC_API_TOKEN` is a GitHub Actions repository Secret used to start Codemagic builds and download artifacts. `CODEMAGIC_APP_ID` optionally overrides the application ID configured in the workflow.
 
 ## Initial setup
 
@@ -21,9 +22,17 @@
    Add `mise-cache-1:<public-key>` to the README and the `CACHE_PUBLIC_KEY` repository Variable. Do not commit `cache-secret.key`.
 4. In Cloudflare R2, create an S3 API token scoped to the `mise-nix-cache` bucket with Object Read & Write access. Store its Access Key ID and Secret Access Key as the two `cache-publish` Environment Secrets. Record the account ID as `R2_ACCOUNT_ID`.
 5. Add `NIX_CACHE_SECRET_KEY` to the `cache-publish` Environment. If the secret contains a key name prefix and colon, preserve it exactly.
-6. Configure required reviewers on the `cache-publish` Environment before enabling production publishing.
+6. Configure required reviewers on the `cache-publish` Environment before enabling production publishing. Add the Codemagic account API token as the `CODEMAGIC_API_TOKEN` repository Secret. If the Codemagic application changes, set the `CODEMAGIC_APP_ID` repository Variable to its application ID.
 7. Confirm the R2 storage allowance and account usage, and complete the build-size P0 measurements before enabling the workflow.
 8. With scheduling still disabled, run the workflow manually on `main` with `publish=true` and approve the protected environment. Verify the artifact transfer, signed upload, public restore, success metadata, licensing, and storage usage. Only after all P0 gates pass, set the repository Variable `CACHE_PUBLISH_ENABLED` to `true` to enable scheduled publication.
+
+## Codemagic build
+
+GitHub Actions selects the release and starts `build-mise-cache` on Codemagic. The Codemagic job checks that it has the same project commit, builds the selected upstream SHA, and exports an unsigned Nix cache. It receives no Codemagic API token, signing key, or R2 credentials. GitHub Actions downloads the artifact without forwarding its API token to a redirect, extracts only allowed regular files, and transfers it to the protected publish job for validation and signing.
+
+Start a forced manual workflow with `publish=false` to verify the handoff before enabling publication. Check the Codemagic build URL printed by the GitHub Actions build job, the manifest, and the transferred artifact. If the branch moves before Codemagic checks it out, the project-commit check fails; rerun against the new commit. The build and artifact transfer are not yet verified end to end.
+
+Codemagic's job limit is 120 minutes. The personal plan provides 500 free M2 minutes per month. The project artifact size threshold is not a Codemagic service limit; confirm the actual build time, disk usage, and transfer size before enabling scheduling.
 
 ## P0 measurement
 

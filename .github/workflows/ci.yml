@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - name: Check Worker
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh -s -- -y
+          "$HOME/.deno/bin/deno" test --no-check src/worker_test.ts
+      - name: Check build handoff
+        run: |
+          shellcheck scripts/codemagic-build.sh scripts/codemagic-build_test.sh
+          go test scripts/extract-cache.go scripts/extract-cache_test.go
+          bash scripts/codemagic-build_test.sh
+      - name: Check workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml

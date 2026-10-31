@@ -76,8 +76,8 @@ jobs:
   build:
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
-    runs-on: macos-15
-    timeout-minutes: 240
+    runs-on: ubuntu-latest
+    timeout-minutes: 165
     permissions:
       contents: read
     outputs:
@@ -88,15 +88,14 @@ jobs:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
         with:
           persist-credentials: false
-      - uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e
-        with:
-          github-token: ""
-          determinate: false
-          source-tag: v3.24.1
-      - name: Build and export
+      - name: Build on Codemagic and retrieve unsigned cache
         id: build
-        timeout-minutes: 225
-        run: scripts/build-cache.sh "${{ needs.resolve.outputs.sha }}" "$RUNNER_TEMP/mise-cache"
+        env:
+          CODEMAGIC_API_TOKEN: ${{ secrets.CODEMAGIC_API_TOKEN }}
+          CODEMAGIC_APP_ID: ${{ vars.CODEMAGIC_APP_ID || '6ae61db7bf6d4e34d0cb29e1' }}
+          UPSTREAM_SHA: ${{ needs.resolve.outputs.sha }}
+          EXPECTED_STORE_PATH: ${{ needs.resolve.outputs.store_path }}
+        run: bash scripts/codemagic-build.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: mise-cache-${{ needs.resolve.outputs.sha }}-aarch64-darwin
