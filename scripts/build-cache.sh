@@ -49,7 +49,7 @@ disk_after=$(df -k /nix | awk 'NR == 2 { print $4 * 1024 }')
 kill "$sampler_pid" 2>/dev/null || true
 wait "$sampler_pid" 2>/dev/null || true
 trap - EXIT
-peak_free_disk=$(sort -n "$disk_samples" | head -n 1)
+peak_free_disk=$(awk 'NR == 1 || $1 < min { min = $1 } END { if (NR == 0) exit 1; print min }' "$disk_samples")
 rm -f "$disk_samples"
 entries_file="$output_dir/manifest-files.jsonl"
 : > "$entries_file"
