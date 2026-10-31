@@ -3,15 +3,15 @@
 ## Current state
 
 - R2 bucket: `mise-nix-cache` (Standard, private by default).
-- Worker: deployed at `https://mise-nix-cache.i2kiii-fib.workers.dev`; read-only routes are verified. The bucket is empty until a signed publication succeeds.
+- Worker: deployed at `https://mise-nix-cache.itk-koshiishi.net`; signed cache retrieval and restoration are verified. The first successful publication is recorded for mise `v2026.10.24` at `aa26090fc10184bf61997e5784f72c365c8c8ece`.
 - Upstream target: the latest published stable `jdx/mise` GitHub release tag, `aarch64-darwin`, `#mise`. Unreleased `main` commits are excluded from automatic publication.
-- GitHub Actions publication is disabled until these P0 gates pass: exported closure transfer capacity, Nix signature verification, public cache retrieval, clean-client substitution, and redistribution licensing review.
+- Scheduled publication is disabled until the remaining P0 gates, including redistribution licensing review, pass.
 - `CACHE_URL`, `CACHE_PUBLIC_KEY`, and `R2_ACCOUNT_ID` are GitHub repository Variables. `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `NIX_CACHE_SECRET_KEY` belong only to the protected `cache-publish` Environment.
 
 ## Initial setup
 
 1. Confirm the `mise-nix-cache` R2 bucket is the intended project bucket. Keep the bucket private; the Worker provides anonymous read-only access.
-2. Deploy the Worker with `wrangler deploy`. Record the `workers.dev` URL as `CACHE_URL`. For a stable production endpoint, connect a domain managed in the same Cloudflare account to this bucket or Worker and configure it as the cache URL.
+2. Deploy the Worker with `wrangler deploy`. Its configured custom domain is `https://mise-nix-cache.itk-koshiishi.net`; use this URL as `CACHE_URL` after verifying public cache retrieval.
 3. Generate the Nix signing key once on a trusted operator machine:
 
    ```sh
@@ -73,5 +73,5 @@ The build job exports an unsigned Nix binary cache, then uploads it as an artifa
 ## Pause or disable serving
 
 - Stop scheduled publication by disabling the GitHub Actions workflow.
-- To stop anonymous reads, remove the Worker route or disable its workers.dev endpoint. Keep the bucket intact while investigating.
+- To stop anonymous reads, remove the Worker's custom domain. Keep the bucket intact while investigating.
 - Do not delete the R2 bucket or objects without reviewing cache references and the intended retention policy.

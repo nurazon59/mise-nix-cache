@@ -1,7 +1,11 @@
 name = "mise-nix-cache"
 main = "src/worker.ts"
 compatibility_date = "2025-10-01"
-workers_dev = true
+workers_dev = false
+
+[[routes]]
+pattern = "mise-nix-cache.itk-koshiishi.net"
+custom_domain = true
 
 [[r2_buckets]]
 binding = "CACHE"
