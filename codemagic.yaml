@@ -1,0 +1,42 @@
+workflows:
+  worker-ci:
+    name: Worker CI
+    instance_type: mac_mini_m2
+    max_build_duration: 10
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: '*'
+          include: true
+          source: true
+    scripts:
+      - name: Install Deno
+        script: curl -fsSL https://deno.land/install.sh | sh -s -- -y
+      - name: Check and test Worker
+        script: |
+          export PATH="$HOME/.deno/bin:$PATH"
+          deno test --check src/worker_test.ts
+
+  measure-mise-build:
+    name: Measure mise Nix build
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    scripts:
+      - name: Install Nix
+        script: |
+          curl --proto '=https' --tlsv1.2 -sSfL https://install.determinate.systems/nix/tag/v3.24.1 | sh -s -- install macos --no-confirm --prefer-upstream-nix
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+          nix --version
+      - name: Measure upstream build
+        script: |
+          set -euo pipefail
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+          export GITHUB_OUTPUT="$CM_EXPORT_DIR/github-output"
+          mkdir -p "$CM_EXPORT_DIR/mise-build-measurement"
+          touch "$GITHUB_OUTPUT"
+          upstream_sha=$(curl -fsSL https://api.github.com/repos/jdx/mise/commits/main | jq -er .sha)
+          scripts/measure-build.sh "$upstream_sha" "$CM_EXPORT_DIR/mise-build-measurement"
+    artifacts:
+      - $CM_EXPORT_DIR/mise-build-measurement/**/*
