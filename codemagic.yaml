@@ -36,7 +36,7 @@ workflows:
           export GITHUB_OUTPUT="$CM_EXPORT_DIR/github-output"
           mkdir -p "$CM_EXPORT_DIR/mise-build-measurement"
           touch "$GITHUB_OUTPUT"
-          upstream_sha=$(curl -fsSL https://api.github.com/repos/jdx/mise/commits/main | jq -er .sha)
+          upstream_sha=$(git ls-remote --exit-code https://github.com/jdx/mise.git refs/heads/main | awk '{print $1}')
           scripts/measure-build.sh "$upstream_sha" "$CM_EXPORT_DIR/mise-build-measurement"
     artifacts:
       - $CM_EXPORT_DIR/mise-build-measurement/**/*
