@@ -5,7 +5,7 @@
 - R2 bucket: `mise-nix-cache` (Standard, private by default).
 - Worker: deployed at `https://mise-nix-cache.itk-koshiishi.net`; signed cache retrieval and restoration are verified. The first successful publication is recorded for mise `v2026.10.24` at `aa26090fc10184bf61997e5784f72c365c8c8ece`.
 - Upstream target: the latest published stable `jdx/mise` GitHub release tag, `aarch64-darwin`, `#mise`. Unreleased `main` commits are excluded from automatic publication.
-- Scheduled publication is enabled in the workflow and checks for stable mise releases every six hours. A `cache-publish` Environment with required reviewers still requires manual approval; remove that protection rule for unattended publication. Redistribution licensing review remains outstanding.
+- Scheduled publication is enabled in the workflow and checks for stable mise releases every hour. A `cache-publish` Environment with required reviewers still requires manual approval; remove that protection rule for unattended publication. Redistribution licensing review remains outstanding.
 - `CACHE_URL`, `CACHE_PUBLIC_KEY`, and `R2_ACCOUNT_ID` are GitHub repository Variables. `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `NIX_CACHE_SECRET_KEY` belong only to the protected `cache-publish` Environment.
 
 ## Initial setup
@@ -43,7 +43,7 @@ The build job exports an unsigned Nix binary cache, then uploads it as an artifa
 
 ## Workflow operation
 
-- The scheduled workflow polls `jdx/mise` GitHub Releases every six hours and selects only the latest published, non-prerelease release tag (for example, `v2026.10.24`). GitHub's release API resolves the tag to an immutable commit SHA for the build. Commits on `main` without a published stable release are ignored; multiple releases between polls may result in only the latest being built.
+- The scheduled workflow polls `jdx/mise` GitHub Releases every hour and selects only the latest published, non-prerelease release tag (for example, `v2026.10.24`). GitHub's release API resolves the tag to an immutable commit SHA for the build. Commits on `main` without a published stable release are ignored; multiple releases between polls may result in only the latest being built.
 - `workflow_dispatch` builds the latest published stable release (optionally with `force=true` to bypass the existing-cache check). Set `publish=true` to publish a manual run; otherwise it remains build-only. Scheduled runs publish automatically without that input. Arbitrary commit SHAs cannot be selected through the production workflow. Use the separate measurement workflow for diagnostics.
 - Existing release paths are skipped only when their contents and signatures verify from the public URL with the configured signing public key.
 - Only runs on the repository's `main` branch can publish. Pull requests and other branches cannot access the protected Environment.
