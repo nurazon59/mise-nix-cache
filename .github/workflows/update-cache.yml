@@ -9,7 +9,7 @@ on:
         required: false
         default: false
       publish:
-        description: Publish this manual run after approving the protected environment
+        description: Publish this manual run to the cache-publish environment
         type: boolean
         required: false
         default: false
