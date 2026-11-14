@@ -5,7 +5,7 @@
 - R2 bucket: `mise-nix-cache` (Standard, private by default).
 - Worker: deployed at `https://mise-nix-cache.itk-koshiishi.net`; signed cache retrieval and restoration are verified. The first successful publication is recorded for mise `v2026.10.24` at `aa26090fc10184bf61997e5784f72c365c8c8ece`.
 - Upstream target: the latest published stable `jdx/mise` GitHub release tag, `aarch64-darwin`, `#mise`. Unreleased `main` commits are excluded from automatic publication.
-- Scheduled publication is disabled until the remaining P0 gates, including redistribution licensing review, pass.
+- Scheduled publication is enabled in the workflow and checks for stable mise releases every six hours. A `cache-publish` Environment with required reviewers still requires manual approval; remove that protection rule for unattended publication. Redistribution licensing review remains outstanding.
 - `CACHE_URL`, `CACHE_PUBLIC_KEY`, and `R2_ACCOUNT_ID` are GitHub repository Variables. `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `NIX_CACHE_SECRET_KEY` belong only to the protected `cache-publish` Environment.
 
 ## Initial setup
@@ -21,9 +21,9 @@
    Add `mise-cache-1:<public-key>` to the README and the `CACHE_PUBLIC_KEY` repository Variable. Do not commit `cache-secret.key`.
 4. In Cloudflare R2, create an S3 API token scoped to the `mise-nix-cache` bucket with Object Read & Write access. Store its Access Key ID and Secret Access Key as the two `cache-publish` Environment Secrets. Record the account ID as `R2_ACCOUNT_ID`.
 5. Add `NIX_CACHE_SECRET_KEY` to the `cache-publish` Environment. If the secret contains a key name prefix and colon, preserve it exactly.
-6. Configure required reviewers on the `cache-publish` Environment before enabling production publishing.
-7. Confirm the R2 storage allowance and account usage, and complete the build-size P0 measurements before enabling the workflow.
-8. With scheduling still disabled, run the workflow manually on `main` with `publish=true` and approve the protected environment. Verify the artifact transfer, signed upload, public restore, success metadata, licensing, and storage usage. Only after all P0 gates pass, set the repository Variable `CACHE_PUBLISH_ENABLED` to `true` to enable scheduled publication.
+6. For unattended publication, configure `cache-publish` without **Required reviewers** or a **Wait timer**. Keep the existing Environment secrets scoped to this environment and the workflow limited to `main`.
+7. Confirm the R2 storage allowance, current usage, build-size P0 measurements, and redistribution licensing before relying on scheduled publication. There is no automatic R2 garbage collection or hard free-tier storage limit.
+8. Run the workflow manually on `main` with `publish=true` to verify artifact transfer, signed upload, public restore, success metadata, and storage usage. Once all prerequisites are satisfied and Environment approvals are removed, scheduled publication proceeds without operator input. The `CACHE_PUBLISH_ENABLED` repository Variable is no longer used.
 
 ## P0 measurement
 
@@ -43,9 +43,9 @@ The build job exports an unsigned Nix binary cache, then uploads it as an artifa
 
 ## Workflow operation
 
-- The scheduled workflow polls `jdx/mise` GitHub Releases every hour and selects only the latest published, non-prerelease release tag (for example, `v2026.10.24`). GitHub's release API resolves the tag to an immutable commit SHA for the build. Commits on `main` without a published stable release are ignored; multiple releases between polls may result in only the latest being built.
-- `workflow_dispatch` builds the latest published stable release (optionally with `force=true` to bypass the existing-cache check). Set `publish=true` for a one-off publication while scheduled publication is disabled; otherwise a manual run is build-only unless scheduled publication is enabled. Arbitrary commit SHAs cannot be selected through the production workflow. Use the separate measurement workflow for diagnostics.
-- Existing release paths are skipped only when their contents and signatures verify from the public URL with the configured signing public key. If publishing is disabled, scheduled runs do not start.
+- The scheduled workflow polls `jdx/mise` GitHub Releases every six hours and selects only the latest published, non-prerelease release tag (for example, `v2026.10.24`). GitHub's release API resolves the tag to an immutable commit SHA for the build. Commits on `main` without a published stable release are ignored; multiple releases between polls may result in only the latest being built.
+- `workflow_dispatch` builds the latest published stable release (optionally with `force=true` to bypass the existing-cache check). Set `publish=true` to publish a manual run; otherwise it remains build-only. Scheduled runs publish automatically without that input. Arbitrary commit SHAs cannot be selected through the production workflow. Use the separate measurement workflow for diagnostics.
+- Existing release paths are skipped only when their contents and signatures verify from the public URL with the configured signing public key.
 - Only runs on the repository's `main` branch can publish. Pull requests and other branches cannot access the protected Environment.
 - A failed build, artifact validation, upload, or public restore is not a successful publication. Inspect the named job and retain the previous cache objects.
 - A Nix store path is immutable, so rerunning the same SHA does not need to replace successful NARs.
