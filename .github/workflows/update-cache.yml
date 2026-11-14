@@ -14,7 +14,7 @@ on:
         required: false
         default: false
   schedule:
-    - cron: "17 * * * *"
+    - cron: "17 */6 * * *"
 
 concurrency:
   group: mise-cache-aarch64-darwin
@@ -25,7 +25,6 @@ permissions:
 
 jobs:
   resolve:
-    if: github.event_name != 'schedule' || vars.CACHE_PUBLISH_ENABLED == 'true'
     runs-on: macos-15
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
@@ -107,7 +106,7 @@ jobs:
 
   publish:
     needs: [resolve, build]
-    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main' && (vars.CACHE_PUBLISH_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: macos-15
     environment: cache-publish
     permissions:
