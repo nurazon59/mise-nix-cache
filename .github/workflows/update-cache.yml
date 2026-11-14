@@ -15,11 +15,6 @@ on:
         default: false
   schedule:
     - cron: "17 * * * *"
-  # One-time validation trigger: remove after run is queued.
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/update-cache.yml"
 
 concurrency:
   group: mise-cache-aarch64-darwin
@@ -111,7 +106,7 @@ jobs:
 
   publish:
     needs: [resolve, build]
-    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    if: needs.resolve.outputs.skip != 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: macos-15
     environment: cache-publish
     permissions:
